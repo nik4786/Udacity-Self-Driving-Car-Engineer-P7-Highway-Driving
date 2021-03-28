@@ -154,4 +154,29 @@ vector<double> getXY(double s, double d, const vector<double> &maps_s,
   return {x,y};
 }
 
-#endif  // HELPERS_H
+
+// detecting the nearest car at front 
+float gap_lane_status (double car_s,double check_car_s,int red_zone)
+{                      
+  if ((check_car_s - car_s <= red_zone)||(car_s - check_car_s <= red_zone ))
+  {
+    return 0;   
+  }  
+} 
+
+// find lane of given d coordinate
+int findLaneID (double d) {
+  double currentLane;
+  if (d > 0 && d <= 4) {
+    currentLane = 0;
+  } else if (d > 4 && d <= 8) {
+    currentLane = 1;
+  } else if (d > 8 && d <= 12) {
+    currentLane = 2;
+  } 
+  
+  return currentLane;
+}
+
+
+#endif  // HELPERS_H        

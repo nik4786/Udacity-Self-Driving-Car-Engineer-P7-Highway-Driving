@@ -1,11 +1,3 @@
-/* 
-* File name: main.cpp
-* Author: Nijinshan Karunainayagam
-* Date created: 24.03.2021 
-* Date last modified: 28.03.2021
-*
-* main file of highway driving project
-*/
 #include <uWS/uWS.h>
 #include <fstream>
 #include <iostream>
@@ -15,7 +7,6 @@
 #include "Eigen-3.3/Eigen/QR"
 #include "helpers.h"
 #include "json.hpp"
-#include "calculateCost.h"
 
 //external reference available in https://kluge.in-chemnitz.de/opensource/spline/spline.h
 #include "spline.h"  
@@ -62,7 +53,7 @@ int main() {
     map_waypoints_dy.push_back(d_y);
   }
 
-  // define init lane and velocity
+  // define init lane and velcity
   int lane = 1;
   double ref_vel = 0.0;
   
@@ -110,30 +101,14 @@ int main() {
           if(prev_size > 0) {
             car_s = end_path_s;
           }
-          
-          
-          /*
-          * INITIALIZATION OF VARIABLES
-          */
-          double dist;
-          double minDist;
-          double step_time = 0.02; // step time
-          double t = prev_size * step_time; // prediction time
-          double MAX_ACC = 9.0; // max acceleration
-          double MAX_VEL = 49.5 * (1600.0 / 3600.0); // max velocity in m/s
+          // initialize parameters
           bool criticalDistance = false; // check, if target is too close
-          double trackedObj_FL = 999; // object tracked front left
-          double trackedObj_RL = 999; // object tracker rear left
-          double trackedObj_Front = 999; // object tracked front
-          double trackedObj_Rear = 999; // object tracked rear                     
-          double trackedObj_FR = 999; // object tracked front right
-          double trackedObj_RR = 999; // object tracked rear right 
-          double vel_FL = 999; // velocity of front left object
-          double vel_RL = 999; // velocity of rear left object
-          double vel_front = 999; // velocity of lead object
-		  double vel_rear = 999; // velocity of object behind
-          double vel_FR = 999; // velocity of front right object
-          double vel_RR = 999; // velocity of rear right object
+          double trackedObj_FL = 0.5; // object tracked front left
+          double trackedObj_RL = 0.5; // object tracker rear left
+          double trackedObj_Front = 0.5; // object tracked front
+          double trackedObj_Rear = 0.5; // object tracked rear                     
+          double trackedObj_FR = 0.5; // object tracked front right
+          double trackedObj_RR = 0.5; // object tracked rear right             
           double lookAhead = 30; // lookahead distance: 44.44 m (2 second rule for 50 mph)
           double lookBehind = 25; // lookbehind distance
           double actionAhead = 30;  // init action distance rear
@@ -141,14 +116,13 @@ int main() {
           double safetyDistance = 22.22; // safety distance to front target
           double car_speed_ahead = -1; // velocity of lead target
           double closestLeadDistance = lookAhead; // distance to closest lead
+          double left_lane_speed = 1;
+          double right_lane_speed = 0;
+          double car_at_middle_front_position = 200;
           
-          /*
-          * LOGIC TO CHECK EGO'S ENVIRONMENT
-          */
+          // Check ego's environment
           for (int i = 0;  i < sensor_fusion.size(); ++i)
           {                       
-            // Get all information of sensor fusion data 
-            // and declare them
             double d = sensor_fusion[i][6];   
             int target_ID = sensor_fusion[i][0];
             double target_PosX = sensor_fusion[i][1];
@@ -161,115 +135,157 @@ int main() {
             double target_lane = findLaneID(target_d);
             double ego_lane = findLaneID(car_d);
             double distance_s = target_s - car_s;                 
-            // Check, in which lane the target is and the position
-            // w.r.t. ego.
-  		    if (target_lane == ego_lane) {
-              dist = target_s - car_s;
-              if (dist > 0 && dist < lookAhead && dist < trackedObj_Front) {
-                trackedObj_Front = dist;
-                vel_front = target_Vel;
+            
+  
+            
+            //car is in my lane
+            if (target_lane == ego_lane) {                          
+              target_s += ((double)prev_size* .02 * target_Vel);
+              //car position and speed on the maneuvering time
+              if ((target_s > car_s) && ((target_s - car_s) < lookAhead )) {          
+                criticalDistance = true; 
+                if ( target_s < closestLeadDistance) {
+                  closestLeadDistance = target_s;
+                  car_speed_ahead = target_Vel;
+                }
               }
-            } else if (ego_lane != 0 && target_lane == ego_lane-1) {
-              dist = target_s - car_s;
-              if (dist > 0 && dist < lookAhead+0.265 && dist < trackedObj_FL) {
-                trackedObj_FL = dist;
-                vel_FL = target_Vel;
-              } else if (dist < 0 && dist > -lookAhead-0.265 && std::abs(dist) < trackedObj_RL) {
-                trackedObj_RL = std::abs(dist);
-                vel_RL = target_Vel;
+            }             
+            target_s += ((double)prev_size* .02 * target_Vel);          
+            
+            // checking left lane gap
+            if ((d < 4) && (target_s >= car_s)) {                         
+              if(target_Vel > left_lane_speed) {
+                left_lane_speed = target_Vel;
+              }              
+              if (target_s - car_s <= actionAhead) { // checking car at front. 
+                trackedObj_FL = 0;
               }
-            } else if (ego_lane != 2 && target_lane == ego_lane+1) {
-              dist = target_s - car_s;
-              if (dist > 0 && dist < lookAhead+0.265 && dist < trackedObj_FR) {
-                trackedObj_FR = dist;
-                vel_FR = target_Vel;
-              } else if (dist < 0 && dist > -lookAhead-0.265 && std::abs(dist) < trackedObj_RR) {
-                trackedObj_RR = std::abs(dist);
-                vel_RR = target_Vel;
+              else if ((target_Vel > (car_speed*.44704)) && (target_s - car_s > safetyDistance)) {
+                trackedObj_FL = 0.5;
               }
             }
+            else if ((d < 4) && ( car_s >= target_s )) {  
+              if (car_s - target_s <= actionAhead) { // checking car at rear.
+                trackedObj_RL = 0;
+              }
+              else if (((car_speed*.44704) > target_Vel) && (car_s - target_s > safetyDistance)) {
+                trackedObj_RL = 0.5;
+              }
+            }
+            
+            
+            // checking middle lane
+            if ((d > 4) && (d < 8) && (target_s >= car_s )) {                                    
+              if(target_s < car_at_middle_front_position) {
+                car_at_middle_front_position = target_s; 
+              }
+              if (target_s - car_s <= actionAhead) { 
+                trackedObj_Front = 0;
+              }
+              else if ((target_Vel > (car_speed*.44704)) && (target_s - car_s > safetyDistance)) {
+                trackedObj_Front = 0.5;
+              }
+            }
+            
+            else if ((d > 4) && (d < 8) && ( car_s >= target_s )) {  
+              if (car_s - target_s <= actionAhead) {
+                trackedObj_Rear = 0;
+              }
+              else if (((car_speed*.44704) > target_Vel) && (car_s - target_s >= safetyDistance)) {
+                trackedObj_Rear = 0.5;
+              }
+            }
+            
+            // checking right lane
+            if ((d > 8) && (target_s >= car_s)) {                         
+              if(target_Vel > right_lane_speed) {
+                right_lane_speed = target_Vel;
+              }  
+             
+              if (target_s - car_s <= actionAhead) { 
+                trackedObj_FR = 0;
+              }
+              else if ((target_Vel > (car_speed*.44704)) && (target_s - car_s > safetyDistance)) {
+                trackedObj_FR = 0.5;
+              }
+            }
+            else if ((d > 8) && ( car_s >= target_s)) {  
+              if (car_s - target_s <= actionAhead) {
+                trackedObj_RR = 0;
+              }
+              else if (((car_speed*.44704) > target_Vel) && (car_s - target_s > safetyDistance)) {
+                trackedObj_RR = 0.5;
+              }
+            }         
           }
           
-          /*
-          * FINITE STATE MACHINE FOR BEHAVIORAL PLANNING
-          *
-          * CRUISE: no lead vehicle, drive with speed of 50 mph
-          * LANE_CHANGE_LEFT: Switch to left lane (from current lane)
-          * LANE_CHANGE_RIGHT: Switch to right lane (from current lane)
-          */
-          int ego_lane = findLaneID(car_d); // ego's current lane
-          double minimalCost = 9999; // init cost
-          string state = "null"; // init state
-          // get cruise cost and check, if it is the smallest cost
-          double cruiseCost = cruise_cost(trackedObj_Front);
-          if (cruiseCost < minimalCost) {
-            minimalCost = cruiseCost;
-            state = "CRUISE";
-          }
-          // get lane change left cost and check, if it is the smallest cost
-          double laneChangeLCost = laneChangeLeft_cost(ego_lane, trackedObj_FL, trackedObj_RL);
-          if (laneChangeLCost < minimalCost) {
-            minimalCost = laneChangeLCost;
-            state = "LANE_CHANGE_LEFT";
-          }
-          // get lane change right cost and check, if it is the smallest cost
-          double laneChangeRCost = laneChangeRight_cost(ego_lane, trackedObj_FR, trackedObj_RR);
-          if (laneChangeRCost < minimalCost) {
-            minimalCost = laneChangeRCost;
-            state = "LANE_CHANGE_RIGHT";
-          }
-
-          /*
-          * DETERMINE PARAMETERS FOR TRAJECTORY GENERATION
-          */
-          double delta_v;
-          double goal_d;
-          double goal_s;
-          // determine goal d-coordinate and speed difference for different states
-          if (state == "CRUISE") {
-            ego_lane = ego_lane;
-            goal_d = 2 + ego_lane * 4;
-            delta_v = vel_front - ref_vel;
-            goal_s = trackedObj_Front;
-          } else if (state == "LANE_CHANGE_LEFT") {
-            ego_lane = ego_lane - 1;
-            goal_d = 2 + ego_lane * 4;
-            delta_v = vel_FL - ref_vel;
-            goal_s = trackedObj_FL;
-          } else if (state == "LANE_CHANGE_RIGHT") {
-            ego_lane = ego_lane + 1;
-            goal_d = 2 + ego_lane * 4;
-            delta_v = vel_FR - ref_vel;
-            goal_s = trackedObj_FR;
-          }
-          // calculate proper speed difference w.r.t. maximal acceleration
-          if (goal_s == 999 && delta_v > 0) {
-            delta_v = MAX_ACC * step_time;
-          } else if (delta_v < 0) {
-            delta_v = (-MAX_ACC * step_time);
-          } else {
-            delta_v = 0;
-          }
-          //std::cout << "CURRENT LANE:" << ego_lane << std::endl;
-          //std::cout << "GOAL D:" << goal_d << std::endl;
+          float left_lane_gap = trackedObj_FL + trackedObj_RL; // free   
+          float middle_lane_gap = trackedObj_Front + trackedObj_Rear; // free 
+          float right_lane_gap = trackedObj_FR + trackedObj_RR; // free                       
+          
+          // car behavior
+          
+          if (criticalDistance == true)
+          {
+            ref_vel -= .224;
+            if ((lane == 0) && (middle_lane_gap == 1.0))
+            {
+              lane++ ;
+            }
+            else if ((lane == 1) && (left_lane_gap == 1.0) && (right_lane_gap == 1.0))
+            {
+              if (left_lane_speed < right_lane_speed)
+              {
+                lane ++;
+              }
+              else
+              {
+                lane --;
+              }
+            }                 
+            else if ((lane == 1) && (left_lane_gap == 1.0) && (right_lane_gap == 0.0))
+            {
+              lane --;
+            }  
+            else if ((lane == 1) && (left_lane_gap == 0.0) && (right_lane_gap == 1.0))
+            {
+              lane ++;
+            }              
         
+            else if ((lane == 2) && (middle_lane_gap == 1.0))
+            {
+              lane-- ;
+            }
+          }
+          else if (ref_vel < 49.5)
+          {
+            ref_vel += .224;               
+          }
+     
+//---------------------------------------------------------------------------------------------           
           json msgJson;
 
-          /*
-          * TRAJECTORY GENERATION
-          */
-     
+          /**
+           * TODO: define a path made up of (x,y) points that the car will visit
+           *   sequentially every .02 seconds
+           */
+//------------------------------------------------------------------------------------------------------
+            
           // create a list of widely spaced (x,y) waypoints, evenly spaced at 30m
           // later we will interpolate theses waypoints with a spline and fill it in with more points that control speed.          
+          
           vector<double> ptsx;
           vector<double> ptsy;
+          
           //reference x,y and yaw states
           //either we will reference the starting point as where the car is or at the previous path end point
           double ref_x = car_x;
           double ref_y = car_y;
           double ref_yaw = deg2rad(car_yaw);
+          
           //if previous size is almost empty, use the car as starting reference
-          if (prev_size < 2) {
+          if (prev_size < 2)
+          {
             //Use two points that make the path tangent to the car
             double prev_car_x = car_x - cos(car_yaw);
             double prev_car_y = car_y - sin(car_yaw);
@@ -280,7 +296,8 @@ int main() {
             ptsy.push_back(prev_car_y);
             ptsy.push_back(car_y);
           }
-          else {
+          else
+          {
             //redefine reference state as previous path end point
             ref_x = previous_path_x[prev_size-1];
             ref_y = previous_path_y[prev_size-1];
@@ -298,9 +315,9 @@ int main() {
           }
           
           //In frenet add evenly 30m spaced points ahead of the starting reference
-          vector<double>next_wp0 = getXY(car_s+50,goal_d,map_waypoints_s,map_waypoints_x,map_waypoints_y);
-          vector<double>next_wp1 = getXY(car_s+70,goal_d,map_waypoints_s,map_waypoints_x,map_waypoints_y);            
-          vector<double>next_wp2 = getXY(car_s+90,goal_d,map_waypoints_s,map_waypoints_x,map_waypoints_y);  
+          vector<double>next_wp0 = getXY(car_s+30,(2+4 * lane),map_waypoints_s,map_waypoints_x,map_waypoints_y);
+          vector<double>next_wp1 = getXY(car_s+60,(2+4 * lane),map_waypoints_s,map_waypoints_x,map_waypoints_y);            
+          vector<double>next_wp2 = getXY(car_s+90,(2+4 * lane),map_waypoints_s,map_waypoints_x,map_waypoints_y);  
           
           ptsx.push_back(next_wp0[0]);
           ptsx.push_back(next_wp1[0]);
@@ -310,8 +327,10 @@ int main() {
           ptsy.push_back(next_wp1[1]);
           ptsy.push_back(next_wp2[1]);     
           
-          for (int i=0; i < ptsx.size(); i++) {
+          for (int i=0; i < ptsx.size(); i++)
+          {
             // shift car reference angle to 0 degrees
+            
             double shift_x = ptsx[i] - ref_x;
             double shift_y = ptsy[i] - ref_y;
             
@@ -330,7 +349,8 @@ int main() {
           vector<double> next_y_vals;
           
           //Start with all of the previous path points from last time
-          for (int i = 0; i < previous_path_x.size(); i++) {
+          for (int i = 0; i < previous_path_x.size(); i++)
+          {
             next_x_vals.push_back(previous_path_x[i]);
             next_y_vals.push_back(previous_path_y[i]);          
           }
@@ -342,14 +362,9 @@ int main() {
           double x_add_on = 0;
           
           //Fill up the rest of our path planner after filling it with previous points , here we will always output 50 points
-          for (int i = 1; i <= 50 - previous_path_x.size(); i++) {
-            // Set ego's velocity according to lead vehicle and speed limit
-            ref_vel += delta_v;
-			if (ref_vel > MAX_VEL) {
-              ref_vel = MAX_VEL;
-            }
-            //std::cout << ref_vel << std::endl;
-            double N = (target_dist/ (step_time * ref_vel));
+          for (int i = 1; i <= 50 - previous_path_x.size(); i++)
+          {
+            double N = (target_dist/ (.02 * ref_vel/2.24));
             double x_point = x_add_on + (target_x) / N;
             double y_point = s(x_point);
             
